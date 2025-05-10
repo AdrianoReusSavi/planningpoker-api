@@ -31,6 +31,21 @@ public class PlanningHub : Hub
         }
     }
 
+    public async Task SairSala(string salaId, string nome)
+    {
+        if (_rooms.TryGetValue(salaId, out var sala))
+        {
+            sala.Users.Remove(Context.ConnectionId);
+            sala.Votes.Remove(nome);
+
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, salaId);
+            await AtualizarUsers(salaId);
+
+            if (sala.Users.Count == 0)
+                _rooms.TryRemove(salaId, out _);
+        }
+    }
+
     public async Task EnviarVoto(string salaId, string voto)
     {
         if (_rooms.TryGetValue(salaId, out var sala) && sala.Users.TryGetValue(Context.ConnectionId, out var nomeUsuario))
@@ -61,17 +76,15 @@ public class PlanningHub : Hub
     {
         foreach (var salaId in _rooms.Keys)
         {
-            if (_rooms.TryGetValue(salaId, out var sala) && sala.Users.TryGetValue(Context.ConnectionId, out var nomeRemovido))
-            {
-                sala.Users.Remove(Context.ConnectionId);
-                sala.Votes.Remove(nomeRemovido);
+            if (!_rooms.TryGetValue(salaId, out var sala) ||
+                !sala.Users.Remove(Context.ConnectionId, out var nomeRemovido)) continue;
 
-                await Groups.RemoveFromGroupAsync(Context.ConnectionId, salaId);
-                await AtualizarUsers(salaId);
+            sala.Votes.Remove(nomeRemovido);
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, salaId);
+            await AtualizarUsers(salaId);
 
-                if (!sala.Users.Any())
-                    _rooms.TryRemove(salaId, out _);
-            }
+            if (sala.Users.Count == 0)
+                _rooms.TryRemove(salaId, out _);
         }
 
         await base.OnDisconnectedAsync(ex);
