@@ -6,93 +6,101 @@ namespace PlanningPoker.Api.Hubs;
 
 public class PlanningHub : Hub
 {
-    private static ConcurrentDictionary<string, Room> _rooms = new();
+    private static readonly ConcurrentDictionary<string, Room> Rooms = new();
 
-    public async Task CriarSala(string salaId, string nome)
+    public async Task CreateRoom(string name, string roomName)
     {
-        var sala = _rooms.GetOrAdd(salaId, _ => new Room { OwnerId = Context.ConnectionId });
+        var roomId = Guid.NewGuid().ToString();
+        var room = Rooms.GetOrAdd(roomId,
+            _ => new Room
+            {
+                RoomName = roomName,
+                OwnerId = Context.ConnectionId
+            });
 
-        sala.Users[Context.ConnectionId] = nome;
-        await Groups.AddToGroupAsync(Context.ConnectionId, salaId);
-        await AtualizarUsers(salaId);
+        room.Users[Context.ConnectionId] = name;
+        await Groups.AddToGroupAsync(Context.ConnectionId, roomId);
+        await UpdateUsers(roomId);
 
-        await Clients.Group(salaId).SendAsync("AtualizarDono", sala.OwnerId);
+        await Clients.Caller.SendAsync("RoomCreated", roomId, roomName);
+        await Clients.Group(roomId).SendAsync("UpdateOwner", room.OwnerId);
     }
 
-    public async Task EntrarSala(string salaId, string nome)
+    public async Task EnterRoom(string roomId, string name)
     {
-        if (_rooms.TryGetValue(salaId, out var sala))
+        if (Rooms.TryGetValue(roomId, out var room))
         {
-            sala.Users[Context.ConnectionId] = nome;
-            await Groups.AddToGroupAsync(Context.ConnectionId, salaId);
-            await AtualizarUsers(salaId);
+            room.Users[Context.ConnectionId] = name;
+            await Groups.AddToGroupAsync(Context.ConnectionId, roomId);
+            await UpdateUsers(roomId);
 
-            await Clients.Group(salaId).SendAsync("AtualizarDono", sala.OwnerId);
+            await Clients.Caller.SendAsync("RoomJoined", roomId, room.RoomName);
+            await Clients.Group(roomId).SendAsync("UpdateOwner", room.OwnerId);
         }
     }
 
-    public async Task SairSala(string salaId, string nome)
+    public async Task LeaveRoom(string roomId, string name)
     {
-        if (_rooms.TryGetValue(salaId, out var sala))
+        if (Rooms.TryGetValue(roomId, out var room))
         {
-            sala.Users.Remove(Context.ConnectionId);
-            sala.Votes.Remove(nome);
+            room.Users.Remove(Context.ConnectionId);
+            room.Votes.Remove(name);
 
-            await Groups.RemoveFromGroupAsync(Context.ConnectionId, salaId);
-            await AtualizarUsers(salaId);
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, roomId);
+            await UpdateUsers(roomId);
 
-            if (sala.Users.Count == 0)
-                _rooms.TryRemove(salaId, out _);
+            if (room.Users.Count == 0)
+                Rooms.TryRemove(roomId, out _);
         }
     }
 
-    public async Task EnviarVoto(string salaId, string voto)
+    public async Task SendVote(string roomId, string vote)
     {
-        if (_rooms.TryGetValue(salaId, out var sala) && sala.Users.TryGetValue(Context.ConnectionId, out var nomeUsuario))
+        if (Rooms.TryGetValue(roomId, out var room) && room.Users.TryGetValue(Context.ConnectionId, out var username))
         {
-            sala.Votes[nomeUsuario] = voto;
-            await Clients.Group(salaId).SendAsync("AtualizarVoto", nomeUsuario, voto);
+            room.Votes[username] = vote;
+            await Clients.Group(roomId).SendAsync("UpdateVote", username, vote);
         }
     }
 
-    public async Task RevelarVotes(string salaId)
+    public async Task RevealVotes(string roomId)
     {
-        if (_rooms.TryGetValue(salaId, out var sala))
+        if (Rooms.TryGetValue(roomId, out var room))
         {
-            await Clients.Group(salaId).SendAsync("VotesRevelados", sala.Votes);
+            await Clients.Group(roomId).SendAsync("VotesRevealed", room.Votes);
         }
     }
 
-    public async Task ResetarVotes(string salaId)
+    public async Task ResetVotes(string roomId)
     {
-        if (_rooms.TryGetValue(salaId, out var sala) && sala.OwnerId == Context.ConnectionId)
+        if (Rooms.TryGetValue(roomId, out var room) && room.OwnerId == Context.ConnectionId)
         {
-            sala.Votes.Clear();
-            await Clients.Group(salaId).SendAsync("VotacaoResetada");
+            room.Votes.Clear();
+            await Clients.Group(roomId).SendAsync("VotesReset");
         }
     }
 
     public override async Task OnDisconnectedAsync(Exception? ex)
     {
-        foreach (var salaId in _rooms.Keys)
+        foreach (var salaId in Rooms.Keys)
         {
-            if (!_rooms.TryGetValue(salaId, out var sala) ||
+            if (!Rooms.TryGetValue(salaId, out var sala) ||
                 !sala.Users.Remove(Context.ConnectionId, out var nomeRemovido)) continue;
 
             sala.Votes.Remove(nomeRemovido);
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, salaId);
-            await AtualizarUsers(salaId);
+            await UpdateUsers(salaId);
 
             if (sala.Users.Count == 0)
-                _rooms.TryRemove(salaId, out _);
+                Rooms.TryRemove(salaId, out _);
         }
 
         await base.OnDisconnectedAsync(ex);
     }
 
-    private Task AtualizarUsers(string salaId)
+    private Task UpdateUsers(string roomId)
     {
-        var nomes = _rooms[salaId].Users.Values.ToList();
-        return Clients.Group(salaId).SendAsync("AtualizarUsuarios", nomes);
+        var names = Rooms[roomId].Users.Values.ToList();
+        return Clients.Group(roomId).SendAsync("UpdateUsers", names);
     }
 }
