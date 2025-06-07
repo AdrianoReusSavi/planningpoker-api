@@ -6,6 +6,6 @@ namespace PlanningPoker.Api.Controllers;
 [Route("[controller]")]
 public class PingController : ControllerBase
 {
-    [HttpGet]
+    [HttpGet, HttpHead]
     public IActionResult Get() => Ok("pong");
 }
