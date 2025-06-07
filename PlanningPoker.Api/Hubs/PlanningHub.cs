@@ -8,6 +8,11 @@ public class PlanningHub : Hub
 {
     private static readonly ConcurrentDictionary<string, Room> Rooms = new();
 
+    public async Task Ping()
+    {
+        await Clients.Caller.SendAsync("Pong");
+    }
+
     public async Task CreateRoom(string name, string roomName)
     {
         var roomId = Guid.NewGuid().ToString();
@@ -30,6 +35,9 @@ public class PlanningHub : Hub
     {
         if (Rooms.TryGetValue(roomId, out var room))
         {
+            if (room.Users.ContainsValue(name))
+                return;
+
             room.Users[Context.ConnectionId] = name;
             await Groups.AddToGroupAsync(Context.ConnectionId, roomId);
             await UpdateUsers(roomId);
@@ -48,6 +56,14 @@ public class PlanningHub : Hub
 
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, roomId);
             await UpdateUsers(roomId);
+
+            var nextOwner = room.Users.FirstOrDefault();
+
+            if (nextOwner.Key != Context.ConnectionId)
+            {
+                room.OwnerId = nextOwner.Key;
+                await Clients.Group(roomId).SendAsync("UpdateOwner", room.OwnerId);
+            }
 
             if (room.Users.Count == 0)
                 Rooms.TryRemove(roomId, out _);
@@ -90,6 +106,13 @@ public class PlanningHub : Hub
             sala.Votes.Remove(nomeRemovido);
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, salaId);
             await UpdateUsers(salaId);
+
+            if (sala.OwnerId == Context.ConnectionId)
+            {
+                var nextOwner = sala.Users.FirstOrDefault();
+                sala.OwnerId = nextOwner.Key;
+                await Clients.Group(salaId).SendAsync("UpdateOwner", sala.OwnerId);
+            }
 
             if (sala.Users.Count == 0)
                 Rooms.TryRemove(salaId, out _);
