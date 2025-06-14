@@ -4,6 +4,5 @@ public class Room
 {
     public required string OwnerId  { get; set; }
     public required string RoomName { get; set; }
-    public Dictionary<string, string> Users { get; set; } = new();
-    public Dictionary<string, string> Votes { get; set; } = new();
+    public List<User> Users { get; set; } = [];
 }
