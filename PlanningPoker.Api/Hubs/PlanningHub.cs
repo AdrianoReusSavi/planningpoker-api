@@ -29,6 +29,12 @@ public class PlanningHub : Hub
         var success = await AddUserToRoom(roomId, name);
         await Clients.Caller.SendAsync("OnRoom", success);
     }
+    
+    public async Task WatchRoom(string roomId, string name)
+    {
+        var success = await AddWatchRoom(roomId);
+        await Clients.Caller.SendAsync("OnRoom", success);
+    }
 
     public async Task GetRoomSettings()
     {
@@ -36,7 +42,8 @@ public class PlanningHub : Hub
             Rooms.TryGetValue(roomId, out var room))
         {
             var isLeader = room.OwnerId == Context.ConnectionId;
-            await Clients.Caller.SendAsync("RoomSettings", roomId, room.RoomName, isLeader);
+            var isWatching = room.Users.Select(s => s.ConnectionId).Contains(Context.ConnectionId);
+            await Clients.Caller.SendAsync("RoomSettings", roomId, room.RoomName, isLeader, isWatching);
             await Clients.Group(roomId).SendAsync("GetGroup", room.Users);
         }
     }
@@ -102,23 +109,33 @@ public class PlanningHub : Hub
         return true;
     }
 
+    private async Task<bool> AddWatchRoom(string roomId)
+    {
+        if (!Rooms.TryGetValue(roomId, out _))
+            return false;
+
+        UserRooms[Context.ConnectionId] = roomId;
+        await Groups.AddToGroupAsync(Context.ConnectionId, roomId);
+        return true;
+    }
+
     private async Task RemoveUserFromRoom(string roomId)
     {
         if (!Rooms.TryGetValue(roomId, out var room))
             return;
 
         var user = room.Users.FirstOrDefault(u => u.ConnectionId == Context.ConnectionId);
-        if (user is null)
-            return;
-
-        room.Users.Remove(user);
-
-        if (room.OwnerId == user.ConnectionId && room.Users.Count > 0)
+        if (user is not null)
         {
-            room.OwnerId = room.Users.FirstOrDefault()!.ConnectionId;
-            await Clients.Client(room.OwnerId).SendAsync("RoomSettings", roomId, room.RoomName, true);
+            room.Users.Remove(user);
+
+            if (room.OwnerId == user.ConnectionId && room.Users.Count > 0)
+            {
+                room.OwnerId = room.Users.FirstOrDefault()!.ConnectionId;
+                await Clients.Client(room.OwnerId).SendAsync("RoomSettings", roomId, room.RoomName, true);
+            }
         }
-        
+
         UserRooms.TryRemove(Context.ConnectionId, out _);
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, roomId);
         await Clients.Caller.SendAsync("OnRoom", false);
